@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live Feed Sender for the Visually Impaired</title>
+    <!-- Tailwind CSS -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
+      rel="stylesheet"
+    />
+    <style>
+      #liveFeed {
+        /* width: 640px;  Fixed width */
+        height: 480px; /* Fixed height */
+        /* border: 1px solid #ccc; */
+        margin-bottom: 20px;
+      }
+
+      #errorNotification {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+      }
+
+      #objectDescription {
+        border: 1px solid #ccc;
+        padding: 10px;
+        margin-bottom: 20px;
+        display: none;
+      }
+    </style>
+  </head>
+
+  <body class="bg-gray-100">
+    <div class="container mx-auto">
+      <h1 class="mt-8 mb-4 text-3xl font-bold text-center">
+        Live Feed Sender for the Visually Impaired
+      </h1>
+      <div class="flex justify-center">
+        <div class="w-full md:w-2/3">
+          <div class="flex justify-center" style="padding-bottom: 10px;"> <!-- Centering container -->
+            <button id="switchCameraButton" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+              Switch Camera
+            </button>
+          </div>
+          <div class="relative">
+            <video id="liveFeed" class="w-full" autoplay></video>
+            <div
+              id="errorNotification"
+              class="bg-red-500 text-white px-4 py-2 rounded shadow-md hidden"
+            >
+              Error sending frame to backend
+            </div>
+          </div>
+          <div id="objectDescription" class="bg-blue-200 rounded-md">
+            <p id="descriptionText" class="text-lg font-semibold"></p>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tailwind CSS and jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <script>
+      const videoElement = document.getElementById("liveFeed");
+      const errorNotification = document.getElementById("errorNotification");
+      const objectDescription = document.getElementById("objectDescription");
+      const descriptionText = document.getElementById("descriptionText");
+      const switchCameraButton = document.getElementById('switchCameraButton');
+      let sendInterval;
+      let currentCamera = 'user';
+      let res = [];
+      let stream;
+      let recognition;
+
+      // Check if browser supports getUserMedia
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        switchCameraButton.addEventListener('click', switchCamera);
+        // Request permission and start sending frames
+        navigator.mediaDevices
+          .getUserMedia({ video: {
+            facingMode: currentCamera
+          } })
+          .then(function (stream) {
+            videoElement.srcObject = stream
+            const fps = 2 // Frames per second
+            sendInterval = setInterval(() => sendFrame(stream), 1000 / fps);
+            // Initialize speech recognition
+            // recognition = new window.webkitSpeechRecognition()
+            // recognition.lang = "en-US"
+            // recognition.continuous = false
+            // recognition.interimResults = false
+            // recognition.onresult = function (event) {
+            //   const result = event.results[0][0].transcript.toLowerCase()
+            //   if (result === "stop sending") {
+            //     stopSending()
+            //   }
+            // }
+            // recognition.onerror = function (event) {
+            //   console.error("Speech recognition error:", event.error)
+            // }
+          })
+          .catch(function (error) {
+            console.error("Error accessing webcam:", error)
+            showErrorNotification(
+              "Please grant camera permissions to start sending frames."
+            )
+            speak("Please give necessary permissions.") // Speak the message
+          })
+      } else {
+        console.error("getUserMedia is not supported in this browser")
+        showErrorNotification("This browser does not support camera access.")
+      }
+
+      // Function to stop sending frames
+      function stopSending() {
+        clearInterval(sendInterval)
+        if (stream) {
+          const tracks = stream.getTracks()
+          tracks.forEach((track) => track.stop())
+        }
+        // stopSpeechRecognition() // Stop speech recognition
+        clearObjectDescription() // Clear object description
+      }
+
+      // Function to stop speech recognition
+      function stopSpeechRecognition() {
+        if (recognition) {
+          recognition.stop();
+        }
+      }
+
+      // Function to clear object description
+      function clearObjectDescription() {
+        descriptionText.textContent = ""
+        objectDescription.style.display = "none"
+        res = [];
+      }
+
+      // Function to send frame to backend
+      function sendFrame(stream) {
+        const canvas = document.createElement("canvas")
+        const ctx = canvas.getContext("2d")
+        canvas.width = videoElement.videoWidth
+        canvas.height = videoElement.videoHeight
+        ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
+        const imageData = canvas.toDataURL("image/jpeg")
+
+        // Simulating object recognition for demonstration purposes
+        const object = recognizeObject(imageData)
+
+        // Show object description
+        showObjectDescription(object);
+        
+        // Send object description via text-to-speech to aid visually impaired
+        // recognition.start();
+      }
+
+      function switchCamera() {
+        currentCamera = currentCamera === 'user' ? 'environment' : 'user'; // Toggle camera
+        console.log("camera side:", currentCamera);
+      }
+
+      // Function to recognize objects (dummy implementation for demonstration)
+      function recognizeObject(imageData) {
+        // Replace this with actual object recognition logic
+        fetch('/upload-frame', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ frame: imageData })
+            })
+            .then(response => {
+                console.log(response);
+                if(response.ok) {
+                    return response.json();
+                } else {
+                    console.log("Response not OK");
+                }
+            })
+            .then(data => {
+                console.log(data);
+                if(data.output && data.status === "use") {
+                    res.append(data.output);
+                    updateObjectDescription();
+                    speak(data.output);
+                    return data.output;
+                }
+            })
+            .catch(error => {
+                console.error('Error sending frame to backend:', error);
+            });
+      }
+
+      function updateObjectDescription() {
+        // Display recognized objects in the object description block
+        descriptionText.innerHTML = res.join('<br>');
+        objectDescription.style.display = 'block';
+      }
+
+      // Function to show object description
+      function showObjectDescription(object) {
+        objectDescription.style.display = "block"
+      }
+
+      // Function to speak text using browser's speech synthesis
+      function speak(text) {
+        const synth = window.speechSynthesis;
+        const utterance = new SpeechSynthesisUtterance(text);
+        synth.speak(utterance);
+      }
+
+      // Function to show error notification
+      function showErrorNotification(message) {
+        errorNotification.textContent = message
+        errorNotification.style.display = "block"
+      }
+    </script>
+  </body>
+</html>
